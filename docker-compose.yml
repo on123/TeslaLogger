@@ -42,6 +42,7 @@ services:
       - ./TeslaLogger/GrafanaPlugins/:/var/lib/grafana/plugins
       - ./TeslaLogger/GrafanaConfig/datasource.yaml:/etc/grafana/provisioning/datasources/datasource.yml
       - ./TeslaLogger/GrafanaConfig/sample.yaml:/etc/grafana/provisioning/dashboards/dashboards.yml
+      - ./TeslaLogger/GrafanaConfig/grafana.ini:/etc/grafana/grafana.ini
     depends_on:
       - database
 
