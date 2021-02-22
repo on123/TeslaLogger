@@ -98,11 +98,13 @@ else
 			if (LengthUnit == "mile")
 			{
 				$('#ideal_battery_range_km').text((jsonData["ideal_battery_range_km"] / 1.609).toFixed(1) + " mi");
+				$('#full_battery_range_km').text((jsonData["ideal_battery_range_km"]/jsonData["battery_level"]*100/1.609).toFixed(1) + " mi");
 				$('#odometer').text((jsonData["odometer"] / 1.609).toFixed(1) + " mi");
 			}
 			else
 			{
 				$('#ideal_battery_range_km').text(jsonData["ideal_battery_range_km"].toFixed(1) + " km");
+				$('#full_battery_range_km').text((jsonData["ideal_battery_range_km"]/jsonData["battery_level"]*100).toFixed(1) + " km");
 				$('#odometer').text(jsonData["odometer"].toFixed(1) + " km");
 			}
 
@@ -122,16 +124,16 @@ else
 
 				var datetime = at.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit' });
 
-				$('#car_statusLabel').text("Wird geladen:");
+				$('#car_statusLabel').text("<?php t("Wird geladen"); ?>:");
 				$('#car_status').html(jsonData["charger_power"] + " kW / +" + jsonData["charge_energy_added"] + " kWh<br>" + 
 				jsonData["charger_voltage"]+"V / " + jsonData["charger_actual_current"]+"A / "+ 
-				jsonData["charger_phases"]+"P<br>Done: "+ hour +"h "+minute+"m <br>At: " + datetime +  " / " + jsonData["charge_limit_soc"] +"%");
+				jsonData["charger_phases"]+"P<br><?php t("Done"); ?>: "+ hour +"h "+minute+"m <br><?php t("Done at"); ?>: " + datetime +  " / " + jsonData["charge_limit_soc"] +"%");
 
 				updateSMT(jsonData);
 			}
 			else if (jsonData["driving"])
 			{
-				$('#car_statusLabel').text("Fahren:");
+				$('#car_statusLabel').text("<?php t("Fahren"); ?>:");
 				var str = "";
 				if (LengthUnit == "mile")
 					str = (jsonData["speed"]/ 1.609).toFixed(0) + " mph / "
@@ -149,40 +151,40 @@ else
 			}
 			else if (jsonData["online"] && !jsonData["falling_asleep"])
 			{
-				var text = "Online";
+				var text = "<?php t("Online"); ?>";
 
 				if (jsonData["is_preconditioning"])
-					text = text + "<br>Preconditioning " + jsonData["inside_temperature"] +"°C";
+					text = text + "<br><?php t("Preconditioning"); ?> " + jsonData["inside_temperature"] +"°C";
 
 				if (jsonData["sentry_mode"])
-					text = text + "<br>Sentry Mode";
+					text = text + "<br><?php t("Sentry Mode"); ?>";
 
 				if (jsonData["battery_heater"])
-					text = text + "<br>Battery Heater";
+					text = text + "<br><?php t("Battery Heater"); ?>";
 
-				$('#car_statusLabel').text("Status:");
+				$('#car_statusLabel').text("<?php t("Status"); ?>:");
 				$('#car_status').html(text);
 
 				updateSMT(jsonData);
 			}
 			else if (jsonData["sleeping"])
 			{
-				$('#car_statusLabel').text("Status:");
+				$('#car_statusLabel').text("<?php t("Status"); ?>:");
 				$('#car_status').text("<?php t("Schlafen"); ?>");
 
 				hideSMT();
 			}
 			else if (jsonData["falling_asleep"])
 			{
-				$('#car_statusLabel').text("Status:");
+				$('#car_statusLabel').text("<?php t("Status"); ?>:");
 				$('#car_status').text("<?php t("Einschlafen"); ?>");
 
 				hideSMT();
 			}
 			else
 			{
-				$('#car_statusLabel').text("Status:");
-				$('#car_status').text("Offline");
+				$('#car_statusLabel').text("<?php t("Status"); ?>:");
+				$('#car_status').text("<?php t("Offline"); ?>");
 
 				hideSMT();
 			}
@@ -367,7 +369,8 @@ function ShowInfo()
 	  <tr id='BMSMaxChargeRow'><td><b><?php t("Max Charge"); ?>:</b></td><td><span id="BMSMaxCharge"></span></td></tr>
 	  <tr id='BMSMaxDischargeRow'><td><b><?php t("Max Discharge"); ?>:</b></td><td><span id="BMSMaxDischarge"></span></td></tr>
 	  <tr id='CellImbalanceRow'><td><b><?php t("Cell Imbalance"); ?>:</b></td><td><span id="CellImbalance"></span></td></tr>
-	  <tr><td><b><?php t("Typical Range"); ?>:</b></td><td><span id="ideal_battery_range_km">---</span> / <span id="battery_level">---</span> %</td></tr>
+	  <tr><td><b><?php t("Typical Range"); ?>:</b></td><td><span id="ideal_battery_range_km">---</span> / <span id="battery_level">---</span> %<br>= <span id="full_battery_range_km">---</span> / 100 %
+</td></tr>
 	  <tr><td><b><?php t("KM Stand"); ?>:</b></td><td><span id="odometer">---</span></td></tr>
 	  <tr><td><b><?php t("Car Version"); ?>:</b></td><td><span id="car_version">---</span></td></tr>
 	  <tr><td><b><?php t("Last Update"); ?>:</b></td><td><span id="last_update">---</span></td></tr>
@@ -376,7 +379,7 @@ function ShowInfo()
 
 	  <table style="float:left;" class="THeader">
 	  <thead><td colspan="2" class="HeaderL HeaderStyle"><?php t("Letzter Trip"); ?></td></thead>
-	  <tr><td width="130px"><b>Start:</b></td><td width="180px"><span id="trip_start"></span></td></tr>
+	  <tr><td width="130px"><b><?php t("Start"); ?>:</b></td><td width="180px"><span id="trip_start"></span></td></tr>
 	  <tr><td><b><?php t("Dauer"); ?>:</b></td><td><span id="trip_duration_sec">---</span> min</td></tr>
 	  <tr><td><b><?php t("Distanz"); ?>:</b></td><td><span id="trip_distance">---</span> <span id="lt_trip_distance_km">km</span></td></tr>
 	  <tr><td><b><?php t("Verbrauch"); ?>:</b></td><td><span id="trip_kwh">---</span> kWh</td></tr>
