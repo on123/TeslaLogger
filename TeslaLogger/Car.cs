@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -111,8 +112,16 @@ namespace TeslaLogger
         }
 
         public string LastSetChargeLimitAddressName { get => lastSetChargeLimitAddressName; set => lastSetChargeLimitAddressName = value; }
+        public string MFA_Code;
 
         internal int LoginRetryCounter = 0;
+        public double sumkm = 0;
+        public double avgkm = 0;
+        public double kwh100km = 0;
+        public double avgsocdiff = 0;
+        public double maxkm = 0;
+
+        public StringBuilder passwortinfo = new StringBuilder();
 
         [MethodImpl(MethodImplOptions.Synchronized)]
         internal TeslaAPIState GetTeslaAPIState() { return teslaAPIState; }
@@ -234,9 +243,11 @@ namespace TeslaLogger
         {
             try
             {
+                dbHelper.GetAvgConsumption(out this.sumkm, out this.avgkm, out this.kwh100km, out this.avgsocdiff, out this.maxkm);
+
                 if (!webhelper.RestoreToken())
                 {
-                    webhelper.Tesla_token = webhelper.GetTokenAsync().Result;
+                    webhelper.Tesla_token = webhelper.GetToken();
                 }
 
                 if (webhelper.Tesla_token == "NULL")
@@ -275,9 +286,12 @@ namespace TeslaLogger
                 }
 
                 Log("Car: " + ModelName + " - " + Wh_TR + " Wh/km");
+                Log($"VIN decoder: {Tools.VINDecoder(vin, out _, out _, out _, out _, out _, out _)}");
                 dbHelper.GetLastTrip();
 
                 currentJSON.current_car_version = dbHelper.GetLastCarVersion();
+
+                webhelper.StartStreamThread();
             }
             catch (Exception ex)
             {
@@ -518,7 +532,6 @@ namespace TeslaLogger
                         }
                     }
 
-                    webhelper.StartStreamThread(); // für altitude
                     dbHelper.StartDriveState();
                     SetCurrentState(TeslaState.Drive);
 
@@ -601,6 +614,14 @@ namespace TeslaLogger
 
                                     for (int x = 0; x < ApplicationSettings.Default.SuspendAPIMinutes * 10; x++)
                                     {
+                                        if (webhelper.DrivingOrChargingByStream)
+                                        {
+                                            Log("StreamAPI prevents car to get sleep.");
+                                            lastCarUsed = DateTime.Now;
+                                            doSleep = false;
+                                            break;
+                                        }
+
                                         TimeSpan tsSMT = DateTime.Now - currentJSON.lastScanMyTeslaReceived;
                                         if (currentJSON.SMTSpeed > 5 &&
                                             currentJSON.SMTSpeed < 260 &&
@@ -832,6 +853,8 @@ namespace TeslaLogger
             webhelper.StopStreaming();
 
             odometerLastTrip = currentJSON.current_odometer;
+
+            dbHelper.GetAvgConsumption(out this.sumkm, out this.avgkm, out this.kwh100km, out this.avgsocdiff, out this.maxkm);
         }
 
 
@@ -882,9 +905,9 @@ namespace TeslaLogger
         private void RefreshToken()
         {
             TimeSpan ts = DateTime.Now - webhelper.lastTokenRefresh;
-            if (ts.TotalDays > 9)
+            if (ts.TotalDays > 20)
             {
-                // If car wasn't sleeping since 10 days, try to get a new Teslalogger update
+                // If car wasn't sleeping since 20 days, try to get a new Teslalogger update
                 // TODO don't work anymore!
                 UpdateTeslalogger.CheckForNewVersion();
 
@@ -894,7 +917,7 @@ namespace TeslaLogger
                     lastTryTokenRefresh = DateTime.Now;
                     Log("try to get new Token");
 
-                    string temp = webhelper.GetTokenAsync().Result;
+                    string temp = webhelper.GetToken();
                     if (temp != "NULL")
                     {
                         Log("new Token received!");
@@ -939,6 +962,7 @@ namespace TeslaLogger
                             HandleSpeciaFlag_ClimateOff(flag.Value, _oldState, _newState);
                             break;
                         case Address.SpecialFlags.SetChargeLimit:
+                        case Address.SpecialFlags.SetChargeLimitOnArrival:
                         case Address.SpecialFlags.CopyChargePrice:
                         case Address.SpecialFlags.HighFrequencyLogging:
                             break;
@@ -1132,6 +1156,7 @@ namespace TeslaLogger
             // any -> charging
             if (_oldState != TeslaState.Charge && _newState == TeslaState.Charge)
             {
+                // evaluate +hfl special flag
                 Address addr = Geofence.GetInstance().GetPOI(currentJSON.latitude, currentJSON.longitude, false);
                 if (addr != null && addr.specialFlags != null && addr.specialFlags.Count > 0)
                 {
@@ -1147,6 +1172,7 @@ namespace TeslaLogger
                                 break;
                             case Address.SpecialFlags.ClimateOff:
                             case Address.SpecialFlags.OpenChargePort:
+                            case Address.SpecialFlags.SetChargeLimitOnArrival:
                             case Address.SpecialFlags.EnableSentryMode:
                             case Address.SpecialFlags.CopyChargePrice:
                                 break;
@@ -1155,6 +1181,41 @@ namespace TeslaLogger
                                 break;
                         }
                     }
+                }
+            }
+            // driving -> any
+            if (_oldState == TeslaState.Drive && _newState != TeslaState.Drive)
+            {
+                Address addr = Geofence.GetInstance().GetPOI(currentJSON.latitude, currentJSON.longitude, false);
+                if (addr != null && addr.specialFlags != null && addr.specialFlags.Count > 0)
+                {
+                    foreach (KeyValuePair<Address.SpecialFlags, string> flag in addr.specialFlags)
+                    {
+                        switch (flag.Key)
+                        {
+                            case Address.SpecialFlags.SetChargeLimitOnArrival:
+                                Tools.DebugLog($"SetChargeLimitOnArrival: {flag.Value}");
+                                HandleSpecialFlag_SetChargeLimit(addr, flag.Value);
+                                break;
+                            case Address.SpecialFlags.SetChargeLimit:
+                            case Address.SpecialFlags.ClimateOff:
+                            case Address.SpecialFlags.HighFrequencyLogging:
+                            case Address.SpecialFlags.OpenChargePort:
+                            case Address.SpecialFlags.EnableSentryMode:
+                            case Address.SpecialFlags.CopyChargePrice:
+                                break;
+                            default:
+                                Log("handleShiftStateChange unhandled special flag " + flag.ToString());
+                                break;
+                        }
+                    }
+                }
+                // enable +hfl:1m for fast charger
+                if (GetTeslaAPIState().GetBool("fast_charger_present", out bool fast_charger_present) && fast_charger_present)
+                {
+                    DateTime until = DateTime.Now;
+                    until = until.AddMinutes(1);
+                    EnableHighFrequencyLoggingMode(HFLMode.Time, 0, until);
                 }
             }
         }
@@ -1262,6 +1323,7 @@ namespace TeslaLogger
             bool ref_cost_per_minute_found = false;
             DateTime chargeStart = DateTime.Now;
             DateTime chargeEnd = chargeStart;
+            DateTime ref_start_date = DateTime.MinValue;
             double charge_energy_added = 0.0;
 
             // find reference charging session
@@ -1275,7 +1337,8 @@ namespace TeslaLogger
   chargingstate.cost_currency,
   chargingstate.cost_per_kwh,
   chargingstate.cost_per_session,
-  chargingstate.cost_per_minute
+  chargingstate.cost_per_minute,
+  chargingstate.StartDate
 FROM
   chargingstate,
   pos  
@@ -1283,6 +1346,8 @@ WHERE
   chargingstate.pos = pos.id
   AND pos.address = @addr
   AND chargingstate.cost_total IS NOT NULL
+  AND TIMESTAMPDIFF(MINUTE, chargingstate.StartDate, chargingstate.EndDate) > 3
+  AND chargingstate.EndChargingID - chargingstate.StartChargingID > 4
   AND chargingstate.CarID = @CarID
 ORDER BY id DESC
 LIMIT 1", con))
@@ -1311,6 +1376,10 @@ LIMIT 1", con))
                         {
                             ref_cost_per_minute_found = true;
                         }
+                        if (DateTime.TryParse(dr[6].ToString(), out ref_start_date))
+                        {
+                            ref_cost_per_minute_found = true;
+                        }
                         Tools.DebugLog($"find ref charge session: <{dr[0]}> <{dr[1]}> <{dr[2]}> <{dr[3]}> <{dr[4]}> <{dr[5]}>");
                     }
                     con.Close();
@@ -1319,7 +1388,7 @@ LIMIT 1", con))
             if (ref_cost_total != -1.0)
             {
                 // reference charging costs for addr found, now get latest charging session at addr
-                Logfile.Log($"CopyChargePrice: reference charging session found for '{_addr.name}', ID {referenceID} - cost_per_kwh:{ref_cost_per_kwh} cost_per_session:{ref_cost_per_session} cost_per_minute:{ref_cost_per_minute}");
+                Logfile.Log($"CopyChargePrice: reference charging session found for '{_addr.name}', ID {referenceID} - cost_per_kwh:{ref_cost_per_kwh} cost_per_session:{ref_cost_per_session} cost_per_minute:{ref_cost_per_minute} started: {ref_start_date}");
                 int chargeID = 0;
                 using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
                 {

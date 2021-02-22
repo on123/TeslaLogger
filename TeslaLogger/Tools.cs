@@ -33,6 +33,8 @@ namespace TeslaLogger
         private static string _URL_Admin = "";
         private static string _URL_Grafana = "http://raspberry:3000/";
         private static string _Range = "IR";
+        private static string _defaultcar = "";
+        private static string _defaultcarid = "";
         public static DateTime lastGrafanaSettings = DateTime.UtcNow.AddDays(-1);
         private static DateTime lastSleepingHourMinutsUpdated = DateTime.UtcNow.AddDays(-1);
 
@@ -261,6 +263,119 @@ namespace TeslaLogger
             {
                 Logfile.Log("CopyFilesRecursively Exception: " + ex.ToString());
             }
+        }
+
+        internal static object VINDecoder(string vin, out int year, out string carType, out bool AWD, out bool MIC, out string battery, out string motor)
+        {
+            year = 0;
+            carType = "";
+            AWD = false;
+            MIC = false;
+            battery = "";
+            motor = "";
+
+            try
+            {
+                // source https://github.com/mseminatore/TeslaJS/blob/master/teslajs.js
+                int dateCode = (int)vin[9];
+                year = 2010 + dateCode - (int)'A';
+                carType = "n/a";
+                AWD = false;
+                MIC = false;
+                battery = "n/a";
+                motor = "n/a";
+                // handle the skipped 'I' code. We may also need to skip 'O'
+                if (dateCode > 73)
+                {
+                    year--;
+                }
+                switch (vin[3])
+                {
+                    case 'S':
+                        carType = "Model S";
+                        break;
+                    case '3':
+                        carType = "Model 3";
+                        break;
+                    case 'X':
+                        carType = "Model X";
+                        break;
+                    case 'Y':
+                        carType = "Model Y";
+                        break;
+                    case 'R':
+                        carType = "Roadster";
+                        break;
+                }
+                // Check for AWD config 2, 4 or B
+                if (
+                        vin[7] == '2' || // Dual Motor (standard) (Designated for Model S & Model X)
+                        vin[7] == '4' || // Dual Motor (performance) (Designated for Model S & Model X)
+                        vin[7] == 'B' || // Dual motor - standard Model 3
+                        vin[7] == 'C' || // Dual motor - performance Model 3
+                        vin[7] == 'E'    // Dual motor - Model Y
+                    )
+                {
+                    AWD = true;
+                }
+                // check made in China
+                if (vin.StartsWith("LRW"))
+                {
+                    MIC = true;
+                }
+                // battery type, source https://teslawissen.ch/tesla-vin-nummer-des-fahrzeugs-dekodieren/
+                switch (vin[6])
+                {
+                    case 'E':
+                        battery = "NMC";
+                        break;
+                    case 'F':
+                        battery = "LFP";
+                        break;
+                    case 'H':
+                        battery = "hcNMC";
+                        break;
+                    case 'S':
+                        battery = "stdNMC";
+                        break;
+                    case 'V':
+                        battery = "uhcNMC";
+                        break;
+                }
+                // motor, source https://teslawissen.ch/tesla-vin-nummer-des-fahrzeugs-dekodieren/
+                switch (vin[7])
+                {
+                    case '1':
+                        motor = "single";
+                        break;
+                    case '2':
+                        motor = "dual";
+                        break;
+                    case '3':
+                        motor = "single performance";
+                        break;
+                    case '4':
+                        motor = "dual performance";
+                        break;
+                    case 'B':
+                        motor = "3 dual";
+                        break;
+                    case 'C':
+                        motor = "3 dual performance";
+                        break;
+                    case 'E':
+                        motor = "Y dual";
+                        break;
+                }
+
+                return $"{carType} {year} AWD:{AWD} MIC:{MIC} battery:{battery} motor:{motor}";
+            }
+            catch (Exception ex)
+            {
+                Logfile.Log(ex.ToString());
+            }
+
+            return "?";
         }
 
         public static void CopyFile(string srcFile, string directory)
@@ -514,6 +629,26 @@ namespace TeslaLogger
             return bTimeout ? "Timeout! " + sb.ToString() : sb.ToString();
         }
 
+        internal static string ObfuscateVIN(string input)
+        {
+            if (input == null)
+                return null;
+
+            string obfuscated = string.Empty;
+            for (int i = 0; i < input.Length; i++)
+            {
+                if (i >= 11) // Obfuscate Serial Number of VIN
+                {
+                    obfuscated += "X";
+                }
+                else
+                {
+                    obfuscated += input[i];
+                }
+            }
+            return obfuscated;
+        }
+
         internal static bool UseScanMyTesla()
         {
             try
@@ -581,7 +716,7 @@ namespace TeslaLogger
         }
 
 
-        internal static void GrafanaSettings(out string power, out string temperature, out string length, out string language, out string URL_Admin, out string Range, out string URL_Grafana)
+        internal static void GrafanaSettings(out string power, out string temperature, out string length, out string language, out string URL_Admin, out string Range, out string URL_Grafana, out string defaultcar, out string defaultcarid)
         {
             TimeSpan ts = DateTime.UtcNow - lastGrafanaSettings;
             if (ts.TotalMinutes < 10)
@@ -593,6 +728,8 @@ namespace TeslaLogger
                 URL_Admin =_URL_Admin;
                 Range = _Range;
                 URL_Grafana = _URL_Grafana;
+                defaultcar = _defaultcar;
+                defaultcarid = _defaultcarid;
                 return;
             }
 
@@ -603,6 +740,8 @@ namespace TeslaLogger
             URL_Admin = "";
             Range = "IR";
             URL_Grafana = "http://raspberry:3000/";
+            defaultcar = "";
+            defaultcarid = "";
 
             try
             {
@@ -661,6 +800,22 @@ namespace TeslaLogger
                     }
                 }
 
+                if (IsPropertyExist(j, "defaultcar"))
+                {
+                    if (j["defaultcar"].ToString().Length > 0)
+                    {
+                        defaultcar = j["defaultcar"];
+                    }
+                }
+
+                if (IsPropertyExist(j, "defaultcarid"))
+                {
+                    if (j["defaultcarid"].ToString().Length > 0)
+                    {
+                        defaultcarid = j["defaultcarid"];
+                    }
+                }
+
                 _power = power;
                 _temperature = temperature;
                 _length = length;
@@ -668,6 +823,8 @@ namespace TeslaLogger
                 _URL_Admin = URL_Admin;
                 _Range = Range;
                 _URL_Grafana = URL_Grafana;
+                _defaultcar = defaultcar;
+                _defaultcarid = defaultcarid;
 
                 lastGrafanaSettings = DateTime.UtcNow;
             }
@@ -982,18 +1139,83 @@ namespace TeslaLogger
         [MethodImpl(MethodImplOptions.Synchronized)]
         public static void Housekeeping()
         {
-            // df and du before cleanup
-            LogDiskUsage();
-            // log DB usage
-            LogDBUsage();
-            // cleanup Exceptions
-            CleanupExceptionsDir();
-            // cleanup database
-            CleanupDatabaseTableMothership();
-            // run housekeeping regularly:
-            // - after 24h
-            // - but only if car is asleep, otherwise wait another hour
-            CreateMemoryCacheItem(24);
+            try
+            {
+                // df and du before cleanup
+                LogDiskUsage();
+                // log DB usage
+                LogDBUsage();
+                // cleanup Exceptions
+                CleanupExceptionsDir();
+                // cleanup database
+                CleanupDatabaseTableMothership();
+                // cleanup backup folder
+                CleanupBackupFolder();
+
+                // run housekeeping regularly:
+                // - after 24h
+                // - but only if car is asleep, otherwise wait another hour
+                CreateMemoryCacheItem(24);
+            }
+            catch (Exception ex)
+            {
+                Logfile.Log(ex.ToString());
+            }
+        }
+
+        public static void CleanupBackupFolder()
+        {
+            if (Tools.IsDocker())
+                return;
+
+            bool filesFoundForDeletion = false;
+            int countDeletedFiles = 0;
+            long freeDiskSpaceNeeded = 1024;
+
+            if (FreeDiskSpaceMB() > freeDiskSpaceNeeded) // Keep 1GB of free disk space
+                return;
+
+
+            DirectoryInfo di = new DirectoryInfo(Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "backup"));
+
+            if (di.Exists)
+            {
+                var ds = di.GetFiles().OrderBy(p => p.LastWriteTime);
+
+                foreach (var fi in ds)
+                {
+                    if (FreeDiskSpaceMB() > freeDiskSpaceNeeded) // already deleted enough?
+                        return;
+
+                    if ((DateTime.Now - fi.LastWriteTime).TotalDays > 30)
+                    {
+                        try
+                        {
+                            Logfile.Log("Housekeeping: delete file " + fi.Name);
+                            fi.Delete();
+                            filesFoundForDeletion = true;
+                            countDeletedFiles++;
+                        }
+                        catch (Exception ex)
+                        {
+                            Logfile.Log(ex.ToString());
+                        }
+                    }
+                }
+            }
+            if (filesFoundForDeletion)
+            {
+                Logfile.Log($"Housekeeping: {countDeletedFiles} file(s) deleted in Backup direcotry Free Disk Space: {FreeDiskSpaceMB()} MB");
+            }
+        }
+
+        internal static long FreeDiskSpaceMB()
+        {
+            DirectoryInfo di = new DirectoryInfo(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location));
+
+            DriveInfo driveinfo = new DriveInfo(di.Root.FullName);
+            long freeMB = driveinfo.AvailableFreeSpace / 1024 / 1024;
+            return freeMB;
         }
 
         private static void LogDBUsage()
@@ -1072,7 +1294,7 @@ WHERE
                 con.Open();
                 using (MySqlCommand cmd = new MySqlCommand("SELECT COUNT(id), MAX(id), MIN(id) FROM mothership WHERE ts < @tsdate", con))
                 {
-                    cmd.Parameters.AddWithValue("@tsdate", DateTime.Now.AddDays(-90));
+                    cmd.Parameters.AddWithValue("@tsdate", DateTime.Now.AddDays(-GetMothershipKeepDays()));
                     try
                     {
                         MySqlDataReader dr = cmd.ExecuteReader();
@@ -1081,7 +1303,7 @@ WHERE
                             _ = long.TryParse(dr[0].ToString(), out mothershipCount);
                             _ = long.TryParse(dr[1].ToString(), out mothershipMaxId);
                             _ = long.TryParse(dr[2].ToString(), out mothershipMinId);
-                            Logfile.Log($"Housekeeping: database.mothership older than 90 days count: {mothershipCount} minID:{mothershipMinId} maxID:{mothershipMaxId}");
+                            Logfile.Log($"Housekeeping: database.mothership older than {GetMothershipKeepDays()} days count: {mothershipCount} minID:{mothershipMinId} maxID:{mothershipMaxId}");
                         }
                     }
                     catch (Exception ex)
@@ -1115,7 +1337,7 @@ WHERE
                             con.Close();
                         }
                     }
-                    Thread.Sleep(5000);
+                    Thread.Sleep(1000);
                 }
                 // report again
                 using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
@@ -1123,14 +1345,14 @@ WHERE
                     con.Open();
                     using (MySqlCommand cmd = new MySqlCommand("SELECT COUNT(id) FROM mothership WHERE ts < @tsdate", con))
                     {
-                        cmd.Parameters.AddWithValue("@tsdate", DateTime.Now.AddDays(-90));
+                        cmd.Parameters.AddWithValue("@tsdate", DateTime.Now.AddDays(-GetMothershipKeepDays()));
                         try
                         {
                             MySqlDataReader dr = cmd.ExecuteReader();
                             if (dr.Read())
                             {
                                 _ = long.TryParse(dr[0].ToString(), out mothershipCount);
-                                Logfile.Log("Housekeeping: database.mothership older than 90 days count: " + mothershipCount);
+                                Logfile.Log("Housekeeping: database.mothership older than {GetMothershipKeepDays()} days count: " + mothershipCount);
                             }
                         }
                         catch (Exception ex)
@@ -1272,5 +1494,36 @@ WHERE
             }
             return false;
         }
+
+        internal static int GetMothershipKeepDays()
+        {
+            int days = 14; // default
+            try
+            {
+                string filePath = FileManager.GetFilePath(TLFilename.SettingsFilename);
+                if (!File.Exists(filePath))
+                {
+                    Logfile.Log("settings file not found at " + filePath);
+                    return days;
+                }
+                string json = File.ReadAllText(filePath);
+                dynamic j = new JavaScriptSerializer().DeserializeObject(json);
+                if (IsPropertyExist(j, "MothershipKeepDays"))
+                {
+                    int.TryParse(j["MothershipKeepDays"], out days);
+
+                    if (days == 0)
+                    {
+                        days = 14; // default
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logfile.Log(ex.ToString());
+            }
+            return days;
+        }
+
     }
 }

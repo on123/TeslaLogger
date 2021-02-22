@@ -3,6 +3,7 @@ using TeslaLogger;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.Runtime.Caching;
 using System.Net;
+using System.Collections.Generic;
 
 namespace UnitTestsTeslalogger
 {
@@ -78,6 +79,7 @@ namespace UnitTestsTeslalogger
             wh.car.car_type = "model3";
             wh.car.DB_Wh_TR = 0.145;
             wh.car.trim_badging = "";
+            wh.car.vin = "5YJ3E7EA9KFxxxxxx"; 
             wh.UpdateEfficiency();
 
             Assert.AreEqual("M3 LR RWD", wh.car.ModelName);
@@ -188,6 +190,7 @@ namespace UnitTestsTeslalogger
 
             MemoryCache.Default.Remove("GetAvgMaxRage_0");
             MemoryCache.Default.Add("GetAvgMaxRage_0", 535, DateTime.Now.AddMinutes(1));
+            wh.car.vin = "5YJ3E7EA9KFxxxxxx"; 
             wh.car.car_type = "model3";
             wh.car.car_special_type = "base";
             wh.car.DB_Wh_TR = 0.139;
@@ -196,6 +199,18 @@ namespace UnitTestsTeslalogger
 
             Assert.AreEqual("M3 LR FL", wh.car.ModelName);
             Assert.AreEqual(0.139, wh.car.Wh_TR);
+
+            MemoryCache.Default.Remove("GetAvgMaxRage_0");
+            MemoryCache.Default.Add("GetAvgMaxRage_0", 407, DateTime.Now.AddMinutes(1));
+            wh.car.vin = "5YJ3E7EB4KFxxxxxx";
+            wh.car.car_type = "model3";
+            wh.car.car_special_type = "base";
+            wh.car.DB_Wh_TR = 0.133;
+            wh.car.trim_badging = "";
+            wh.UpdateEfficiency();
+
+            Assert.AreEqual("M3 SR+ LFP", wh.car.ModelName);
+            Assert.AreEqual(0.133, wh.car.Wh_TR);
         }
 
         [TestMethod]
@@ -233,5 +248,44 @@ namespace UnitTestsTeslalogger
             Assert.AreEqual("zm7wN6Zgz", uid);
             Assert.AreEqual("http://raspberry:3000/d/zm7wN6Zgz/Verbrauch", link);
         }
+
+        [TestMethod]
+        public void UpdateDefaultCar()
+        {
+            string dashboard = System.IO.File.ReadAllText("../../../TeslaLogger/Grafana/Verbrauch.json");
+            dashboard = UpdateTeslalogger.UpdateDefaultCar(dashboard, "BATmobil", "2", "Fahrzeug");
+
+            Assert.IsTrue(dashboard.Contains("\"text\": \"BATmobil\","));
+            Assert.IsTrue(dashboard.Contains("\"label\": \"Fahrzeug\","));
+
+
+            dashboard = System.IO.File.ReadAllText("../../../TeslaLogger/Grafana/Trip.json");
+            dashboard = UpdateTeslalogger.UpdateDefaultCar(dashboard, "BATmobil", "2", "Fahrzeug");
+
+            Assert.IsTrue(dashboard.Contains("\"text\": \"BATmobil\","));
+            Assert.IsTrue(dashboard.Contains("\"label\": \"Fahrzeug\","));
+        }
+
+        [TestMethod]
+        public void UpdateLanguage()
+        {
+            Dictionary<string, string> dictLanguage = UpdateTeslalogger.GetLanguageDictionary("ru");
+
+            string s = System.IO.File.ReadAllText("../../../TeslaLogger/Grafana/Verbrauchsstatstik.json");
+            s = UpdateTeslalogger.ReplaceTitleTag(s, "Verbrauchsstatistik", dictLanguage);
+            s = UpdateTeslalogger.ReplaceLanguageTags(s, new string[] {
+                                    "km Stand [km]","mi Stand [mi]","Verbrauch Monatsmittel [kWh]","Außentemperatur Monatsmittel [°C]","Außentemperatur Monatsmittel [°F]","Verbrauch Tagesmittel [kWh]","Außentemperatur Tagesmittel [°C]", "Außentemperatur Tagesmittel [°F]"
+                                }, dictLanguage, true);
+
+            Assert.IsFalse(s.Contains("km Stand [km]"));
+            
+        }
+
+        [TestMethod]
+        public void CreateMap()
+        {
+            
+        }
+
     }
 }

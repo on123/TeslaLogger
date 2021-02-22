@@ -26,6 +26,7 @@ namespace TeslaLogger
         public static bool Done { get => _done;}
 
         private static Thread ComfortingMessages = null;
+        public static bool DownloadUpdateAndInstallStarted = false;
 
         public static void StopComfortingMessagesThread()
         {
@@ -408,6 +409,12 @@ CREATE TABLE superchargerstate(
                     Logfile.Log("CREATE TABLE OK");
                 }
 
+                if (!DBHelper.ColumnExists("cars", "refresh_token"))
+                {
+                    Logfile.Log("ALTER TABLE cars ADD Column refresh_token");
+                    DBHelper.ExecuteSQLQuery(@"ALTER TABLE `cars` ADD COLUMN `refresh_token` TEXT NULL DEFAULT NULL", 600);
+                }
+
                 // end of schema update
 
                 if (!DBHelper.TableExists("trip") || !DBHelper.ColumnExists("trip", "outside_temp_avg"))
@@ -433,163 +440,8 @@ CREATE TABLE superchargerstate(
                 CreateEmptyWeatherIniFile();
                 CheckBackupCrontab();
 
-                if (File.Exists("cmd_updated.txt"))
-                {
-                    Logfile.Log("Update skipped!");
-                    try
-                    {
-                        ComfortingMessages.Abort();
-                    }
-                    catch (Exception) { }
-                    return;
-                }
+                DownloadUpdateAndInstall();
 
-                File.AppendAllText("cmd_updated.txt", DateTime.Now.ToLongTimeString());
-                Logfile.Log("Start update");
-
-                if (Tools.IsMono())
-                {
-                    Chmod("VERSION", 666);
-                    Chmod("settings.json", 666);
-                    Chmod("cmd_updated.txt", 666);
-                    Chmod("MQTTClient.exe.config", 666);
-
-                    if (!Tools.Exec_mono("git", "--version", false).Contains("git version"))
-                    {
-                        Tools.Exec_mono("apt-get", "-y install git");
-                        Tools.Exec_mono("git", "--version");
-                    }
-
-                    Tools.Exec_mono("rm", "-rf /etc/teslalogger/git/*");
-
-                    Tools.Exec_mono("rm", "-rf /etc/teslalogger/git");
-                    Tools.Exec_mono("mkdir", "/etc/teslalogger/git");
-                    Tools.Exec_mono("cert-sync", "/etc/ssl/certs/ca-certificates.crt");
-
-                    // download update package from github
-                    bool httpDownloadSuccessful = false;
-                    bool zipExtractSuccessful = false;
-                    string GitHubURL = "https://github.com/bassmaster187/TeslaLogger/archive/master.zip";
-                    string updatepackage = "/etc/teslalogger/tmp/master.zip";
-                    try
-                    {
-                        if (!Directory.Exists("/etc/teslalogger/tmp"))
-                        {
-                            _ = Directory.CreateDirectory("/etc/teslalogger/tmp");
-                        }
-                        if (File.Exists(updatepackage))
-                        {
-                            File.Delete(updatepackage);
-                        }
-                        using (WebClient wc = new WebClient())
-                        {
-                            Logfile.Log($"downloading update package from {GitHubURL}");
-                            wc.DownloadFile(GitHubURL, updatepackage);
-                            Logfile.Log($"update package downloaded to {updatepackage}");
-                            httpDownloadSuccessful = true;
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Logfile.Log("Exception during download from github: " + ex.ToString());
-                        Logfile.ExceptionWriter(ex, "Exception during download from github");
-                    }
-
-                    // unzip downloaded update package
-                    if (httpDownloadSuccessful)
-                    {
-                        try
-                        {
-                            if (File.Exists(updatepackage))
-                            {
-                                if (Directory.Exists("/etc/teslalogger/git"))
-                                {
-                                    Directory.Delete("/etc/teslalogger/git", true);
-                                }
-                                if (Directory.Exists("/etc/teslalogger/tmp/zip"))
-                                {
-                                    Directory.Delete("/etc/teslalogger/tmp/zip", true);
-                                }
-                                Logfile.Log($"unzip update package {updatepackage} to /etc/teslalogger/tmp/zip");
-                                ZipFile.ExtractToDirectory(updatepackage, "/etc/teslalogger/tmp/zip");
-                                // GitHub zip contains folder "TeslaLogger-master" so we have to move files around
-                                if (Directory.Exists("/etc/teslalogger/tmp/zip/TeslaLogger-master"))
-                                {
-                                    Logfile.Log($"move update files from /etc/teslalogger/tmp/zip/TeslaLogger-master to /etc/teslalogger/git");
-                                    Tools.Exec_mono("mv", "/etc/teslalogger/tmp/zip/TeslaLogger-master /etc/teslalogger/git");
-                                    if (Directory.Exists("/etc/teslalogger/git/TeslaLogger/GrafanaPlugins"))
-                                    {
-                                        Logfile.Log("update package: download and unzip successful");
-                                        zipExtractSuccessful = true;
-                                    }
-                                }
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            Logfile.Log("Exception during unzip of downloaded update package: " + ex.ToString());
-                            Logfile.ExceptionWriter(ex, "Exception during unzip of downloaded update package");
-                        }
-                    }
-
-                    // git clone fallback
-                    if (httpDownloadSuccessful == false || zipExtractSuccessful == false)
-                    {
-                        for (int x = 1; x < 10; x++)
-                        {
-                            Logfile.Log("git clone: try " + x);
-                            Tools.Exec_mono("git", "clone --progress https://github.com/bassmaster187/TeslaLogger /etc/teslalogger/git/", true, true);
-
-                            if (Directory.Exists("/etc/teslalogger/git/TeslaLogger/GrafanaPlugins"))
-                            {
-                                Logfile.Log("git clone success!");
-                                break;
-                            }
-                            Logfile.Log("Git failed. Retry in 30 sec!");
-                            System.Threading.Thread.Sleep(30000);
-                        }
-                    }
-
-                    Tools.CopyFilesRecursively(new DirectoryInfo("/etc/teslalogger/git/TeslaLogger/GrafanaPlugins"), new DirectoryInfo("/var/lib/grafana/plugins"));
-                    Tools.CopyFilesRecursively(new DirectoryInfo("/etc/teslalogger/git/TeslaLogger/www"), new DirectoryInfo("/var/www/html"));
-                    Tools.CopyFile("/etc/teslalogger/git/TeslaLogger/bin/geofence.csv", "/etc/teslalogger/geofence.csv");
-                    Tools.CopyFile("/etc/teslalogger/git/TeslaLogger/GrafanaConfig/sample.yaml", "/etc/grafana/provisioning/dashboards/sample.yaml");
-
-                    if (!Directory.Exists("/var/lib/grafana/dashboards"))
-                    {
-                        Directory.CreateDirectory("/var/lib/grafana/dashboards");
-                    }
-
-                    try
-                    {
-                        if (!File.Exists("/etc/teslalogger/MQTTClient.exe.config"))
-                        {
-                            Logfile.Log("Copy empty MQTTClient.exe.config file");
-                            Tools.CopyFile("/etc/teslalogger/git/MQTTClient/App.config", "/etc/teslalogger/MQTTClient.exe.config");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Logfile.Log(ex.ToString());
-                    }
-
-                    Tools.CopyFilesRecursively(new DirectoryInfo("/etc/teslalogger/git/TeslaLogger/bin"), new DirectoryInfo("/etc/teslalogger"), "TeslaLogger.exe");
-
-                    try
-                    {
-                            Tools.CopyFile("/etc/teslalogger/git/TeslaLogger/bin/TeslaLogger.exe", "/etc/teslalogger/TeslaLogger.exe");
-                    }
-                    catch (Exception ex)
-                    {
-                        Logfile.Log(ex.ToString());
-                    }
-                }
-
-                Logfile.Log("End update");
-
-                Logfile.Log("Rebooting");
-
-                Tools.Exec_mono("reboot", "");
             }
             catch (Exception ex)
             {
@@ -605,6 +457,170 @@ CREATE TABLE superchargerstate(
                 catch (Exception) { }
             }
         }
+
+        public static void DownloadUpdateAndInstall()
+        {
+            DownloadUpdateAndInstallStarted = true;
+
+            if (File.Exists("cmd_updated.txt"))
+            {
+                Logfile.Log("Update skipped!");
+                try
+                {
+                    ComfortingMessages.Abort();
+                }
+                catch (Exception) { }
+                return;
+            }
+
+            File.AppendAllText("cmd_updated.txt", DateTime.Now.ToLongTimeString());
+            Logfile.Log("Start update");
+
+            if (Tools.IsMono())
+            {
+                Chmod("VERSION", 666);
+                Chmod("settings.json", 666);
+                Chmod("cmd_updated.txt", 666);
+                Chmod("MQTTClient.exe.config", 666);
+
+                if (!Tools.Exec_mono("git", "--version", false).Contains("git version"))
+                {
+                    Tools.Exec_mono("apt-get", "-y install git");
+                    Tools.Exec_mono("git", "--version");
+                }
+
+                Tools.Exec_mono("rm", "-rf /etc/teslalogger/git/*");
+
+                Tools.Exec_mono("rm", "-rf /etc/teslalogger/git");
+                Tools.Exec_mono("mkdir", "/etc/teslalogger/git");
+                Tools.Exec_mono("cert-sync", "/etc/ssl/certs/ca-certificates.crt");
+
+                // download update package from github
+                bool httpDownloadSuccessful = false;
+                bool zipExtractSuccessful = false;
+                string GitHubURL = "https://github.com/bassmaster187/TeslaLogger/archive/master.zip";
+                string updatepackage = "/etc/teslalogger/tmp/master.zip";
+                try
+                {
+                    if (!Directory.Exists("/etc/teslalogger/tmp"))
+                    {
+                        _ = Directory.CreateDirectory("/etc/teslalogger/tmp");
+                    }
+                    if (File.Exists(updatepackage))
+                    {
+                        File.Delete(updatepackage);
+                    }
+                    using (WebClient wc = new WebClient())
+                    {
+                        Logfile.Log($"downloading update package from {GitHubURL}");
+                        wc.DownloadFile(GitHubURL, updatepackage);
+                        Logfile.Log($"update package downloaded to {updatepackage}");
+                        httpDownloadSuccessful = true;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logfile.Log("Exception during download from github: " + ex.ToString());
+                    Logfile.ExceptionWriter(ex, "Exception during download from github");
+                }
+
+                // unzip downloaded update package
+                if (httpDownloadSuccessful)
+                {
+                    try
+                    {
+                        if (File.Exists(updatepackage))
+                        {
+                            if (Directory.Exists("/etc/teslalogger/git"))
+                            {
+                                Directory.Delete("/etc/teslalogger/git", true);
+                            }
+                            if (Directory.Exists("/etc/teslalogger/tmp/zip"))
+                            {
+                                Directory.Delete("/etc/teslalogger/tmp/zip", true);
+                            }
+                            Logfile.Log($"unzip update package {updatepackage} to /etc/teslalogger/tmp/zip");
+                            ZipFile.ExtractToDirectory(updatepackage, "/etc/teslalogger/tmp/zip");
+                            // GitHub zip contains folder "TeslaLogger-master" so we have to move files around
+                            if (Directory.Exists("/etc/teslalogger/tmp/zip/TeslaLogger-master"))
+                            {
+                                Logfile.Log($"move update files from /etc/teslalogger/tmp/zip/TeslaLogger-master to /etc/teslalogger/git");
+                                Tools.Exec_mono("mv", "/etc/teslalogger/tmp/zip/TeslaLogger-master /etc/teslalogger/git");
+                                if (Directory.Exists("/etc/teslalogger/git/TeslaLogger/GrafanaPlugins"))
+                                {
+                                    Logfile.Log("update package: download and unzip successful");
+                                    zipExtractSuccessful = true;
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logfile.Log("Exception during unzip of downloaded update package: " + ex.ToString());
+                        Logfile.ExceptionWriter(ex, "Exception during unzip of downloaded update package");
+                    }
+                }
+
+                // git clone fallback
+                if (httpDownloadSuccessful == false || zipExtractSuccessful == false)
+                {
+                    for (int x = 1; x < 10; x++)
+                    {
+                        Logfile.Log("git clone: try " + x);
+                        Tools.Exec_mono("git", "clone --progress https://github.com/bassmaster187/TeslaLogger /etc/teslalogger/git/", true, true);
+
+                        if (Directory.Exists("/etc/teslalogger/git/TeslaLogger/GrafanaPlugins"))
+                        {
+                            Logfile.Log("git clone success!");
+                            break;
+                        }
+                        Logfile.Log("Git failed. Retry in 30 sec!");
+                        System.Threading.Thread.Sleep(30000);
+                    }
+                }
+
+                Tools.CopyFilesRecursively(new DirectoryInfo("/etc/teslalogger/git/TeslaLogger/GrafanaPlugins"), new DirectoryInfo("/var/lib/grafana/plugins"));
+                Tools.CopyFilesRecursively(new DirectoryInfo("/etc/teslalogger/git/TeslaLogger/www"), new DirectoryInfo("/var/www/html"));
+                Tools.CopyFile("/etc/teslalogger/git/TeslaLogger/bin/geofence.csv", "/etc/teslalogger/geofence.csv");
+                Tools.CopyFile("/etc/teslalogger/git/TeslaLogger/GrafanaConfig/sample.yaml", "/etc/grafana/provisioning/dashboards/sample.yaml");
+
+                if (!Directory.Exists("/var/lib/grafana/dashboards"))
+                {
+                    Directory.CreateDirectory("/var/lib/grafana/dashboards");
+                }
+
+                try
+                {
+                    if (!File.Exists("/etc/teslalogger/MQTTClient.exe.config"))
+                    {
+                        Logfile.Log("Copy empty MQTTClient.exe.config file");
+                        Tools.CopyFile("/etc/teslalogger/git/MQTTClient/App.config", "/etc/teslalogger/MQTTClient.exe.config");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logfile.Log(ex.ToString());
+                }
+
+                Tools.CopyFilesRecursively(new DirectoryInfo("/etc/teslalogger/git/TeslaLogger/bin"), new DirectoryInfo("/etc/teslalogger"), "TeslaLogger.exe");
+
+                try
+                {
+                    Tools.CopyFile("/etc/teslalogger/git/TeslaLogger/bin/TeslaLogger.exe", "/etc/teslalogger/TeslaLogger.exe");
+                }
+                catch (Exception ex)
+                {
+                    Logfile.Log(ex.ToString());
+                }
+
+                Logfile.Log("End update");
+
+                Logfile.Log("Rebooting");
+
+                Tools.Exec_mono("reboot", "");
+            }
+        }
+
 
         private static void CheckBackupCrontab()
         {
@@ -779,7 +795,7 @@ CREATE TABLE superchargerstate(
                 DBHelper.ExecuteSQLQuery("DROP VIEW IF EXISTS `trip`");
                 string s = DBViews.Trip;
 
-                Tools.GrafanaSettings(out string power, out string temperature, out string length, out string language, out string URL_Admin, out string Range, out _);
+                Tools.GrafanaSettings(out string power, out string temperature, out string length, out string language, out string URL_Admin, out string Range, out _, out _, out _);
                 if (Range == "RR")
                 {
                     s = s.Replace("`pos_start`.`ideal_battery_range_km` AS `StartRange`,", "`pos_start`.`battery_range_km` AS `StartRange`,");
@@ -796,11 +812,12 @@ CREATE TABLE superchargerstate(
             }
         }
 
-        private static Dictionary<string, string> GetLanguageDictionary(string language)
+        internal static Dictionary<string, string> GetLanguageDictionary(string language)
         {
             Dictionary<string, string> ht = new Dictionary<string, string>();
 
             string filename = Path.Combine(FileManager.GetExecutingPath(), "language-" + language + ".txt");
+            filename = filename.Replace("\\bin\\Debug", "\\bin");
             string content = null;
 
             if (File.Exists(filename))
@@ -866,7 +883,7 @@ CREATE TABLE superchargerstate(
             {
                 if (Tools.IsMono())
                 {
-                    Tools.GrafanaSettings(out string power, out string temperature, out string length, out string language, out string URL_Admin, out string Range, out string URL_Grafana);
+                    Tools.GrafanaSettings(out string power, out string temperature, out string length, out string language, out string URL_Admin, out string Range, out string URL_Grafana, out string defaultcar, out string defaultcarid);
 
                     Dictionary<string, string> dictLanguage = GetLanguageDictionary(language);
 
@@ -1064,12 +1081,22 @@ CREATE TABLE superchargerstate(
                             if (f.EndsWith("Akku Trips.json"))
                             {
                                 s = ReplaceTitleTag(s, "Akku Trips", dictLanguage);
+                                s = ReplaceLanguageTags(s, new string[] {
+                                    "AVG Max Range","AVG Consumption","AVG Trip Days","AVG SOC Diff"
+                                }, dictLanguage, true);
                             }
                             else if (f.EndsWith("Degradation.json"))
                             {
                                 s = ReplaceTitleTag(s, "Degradation", dictLanguage);
                                 s = ReplaceLanguageTags(s, new string[] {
-                                    "Maximalreichweite[km]", "Maximalreichweite [mi]","mi Stand [mi]","km Stand [km]","Max. Reichweite (Monatsmittel) [km]","Max. Reichweite (Monatsmittel) [mi]"
+                                    "Maximalreichweite [km]", "Maximalreichweite [mi]","mi Stand [mi]","km Stand [km]","Max. Reichweite (Monatsmittel) [km]","Max. Reichweite (Monatsmittel) [mi]"
+                                }, dictLanguage, true);
+                            }
+                            else if (f.EndsWith("Firmware.json"))
+                            {
+                                s = ReplaceTitleTag(s, "Degradation", dictLanguage);
+                                s = ReplaceLanguageTags(s, new string[] {
+                                    "Firmware","Date Installed","Days since previous update","Min Days Between Updates","AVG Days Between Updates","Max Days Between Updates"
                                 }, dictLanguage, true);
                             }
                             else if (f.EndsWith("Ladehistorie.json"))
@@ -1084,6 +1111,17 @@ CREATE TABLE superchargerstate(
                                     "SOC [%]", "Leistung [PS]", "Leistung [kW]", "Reichweite [mi]", "Reichweite [km]", "Ladespannung [V]", "Phasen",
                                     "Stromstärke [A]", "Außentemperatur [°C]", "Außentemperatur [°F]",
                                     "Angefordert [A]", "Pilot [A]", "Zelltemperatur [°C]", "Zelltemperatur [°F]"
+                                }, dictLanguage, true);
+                            }
+                            else if (f.EndsWith("Speed Consumption.json"))
+                            {
+                                s = ReplaceTitleTag(s, "Speed Consumption", dictLanguage);
+                            }
+                            else if (f.EndsWith("Status.json"))
+                            {
+                                s = ReplaceTitleTag(s, "Status", dictLanguage);
+                                s = ReplaceLanguageTags(s, new string[] {
+                                    "Current Status","SOC","Reichweite","Außentemperatur","Zelltemperatur","km Stand","Firmware","Nur verfügbar mit ScanMyTesla","N/A","Asleep","Online","Offline","Waking","Driving","Charging"
                                 }, dictLanguage, true);
                             }
                             else if (f.EndsWith("Trip.json"))
@@ -1110,6 +1148,13 @@ CREATE TABLE superchargerstate(
                                 s = ReplaceLanguageTags(s, new string[] {
                                     "Geschwindigkeit [km/h]", "Geschwindigkeit [mph]", "Leistung [PS]", "Leistung [kW]", "Reichweite [mi]", "Reichweite [km]", "SOC [%]",
                                     "Außentemperatur [°C]", "Außentemperatur [°F]", "Höhe [m]","Innentemperatur [°C]","Innentemperatur [°F]"
+                                }, dictLanguage, true);
+                            }
+                            else if (f.EndsWith("Verbrauchsstatstik.json"))
+                            {
+                                s = ReplaceTitleTag(s, "Verbrauchsstatistik", dictLanguage);
+                                s = ReplaceLanguageTags(s, new string[] {
+                                    "km Stand[km]","mi Stand [mi]","Verbrauch Monatsmittel [kWh]","Außentemperatur Monatsmittel [°C]","Außentemperatur Monatsmittel [°F]","Verbrauch Tagesmittel [kWh]","Außentemperatur Tagesmittel [°C]", "Außentemperatur Tagesmittel [°F]"
                                 }, dictLanguage, true);
                             }
                             else if (f.EndsWith("Visited.json"))
@@ -1190,6 +1235,11 @@ CREATE TABLE superchargerstate(
                         
                         string title, uid, link;
                         GrafanaGetTitleAndLink(s, URL_Grafana, out title, out uid, out link);
+
+                        string carLabel = "Car";
+                        dictLanguage.TryGetValue("Car", out carLabel);
+
+                        s = UpdateDefaultCar(s, defaultcar, defaultcarid, carLabel);
                         
                         if (!title.Contains("ScanMyTesla") && !title.Contains("Zelltemperaturen") && !title.Contains("SOC ") && !title.Contains("Chargertype") && !title.Contains("Mothership"))
                             dashboardlinks.Add(title+"|"+link);
@@ -1226,6 +1276,25 @@ CREATE TABLE superchargerstate(
             {
                 Logfile.Log("End Grafana update");
             }
+        }
+
+        internal static string UpdateDefaultCar(string s, string name, string id, string carLabel)
+        {
+            try
+            {
+                if (name == null || name.Length == 0)
+                    return s;
+
+                Regex regexAlias = new Regex("(templating.*\\\"text\\\":\\s\\\")(\\\".*?value\\\":\\s\\\")(.*?)(\\\")(.*?display_name)(.*?label\\\":\\s\\\")(.*?)(\\\")", RegexOptions.Singleline | RegexOptions.Multiline);
+                var m = regexAlias.Match(s);
+                string ret = regexAlias.Replace(s, "${1}" + name + "${2}" + id + "${4}${5}${6}"+carLabel+"${8}");
+                return ret;
+            }
+            catch (Exception ex)
+            {
+                Logfile.Log(ex.ToString());
+            }
+            return s;
         }
 
         internal static void GrafanaGetTitleAndLink(string json, string URL_Grafana, out string title, out string uid, out string link)
@@ -1299,7 +1368,7 @@ CREATE TABLE superchargerstate(
             return regexAlias.Replace(content, replace);
         }
 
-        private static string ReplaceTitleTag(string content, string v, Dictionary<string, string> dictLanguage)
+        internal static string ReplaceTitleTag(string content, string v, Dictionary<string, string> dictLanguage)
         {
             if (!dictLanguage.ContainsKey(v))
             {
@@ -1313,7 +1382,7 @@ CREATE TABLE superchargerstate(
             return regexAlias.Replace(content, replace);
         }
 
-        private static string ReplaceLanguageTags(string content, string[] v, Dictionary<string, string> dictLanguage, bool quoted)
+        internal static string ReplaceLanguageTags(string content, string[] v, Dictionary<string, string> dictLanguage, bool quoted)
         {
             foreach (string l in v)
             {
