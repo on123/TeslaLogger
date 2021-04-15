@@ -16,11 +16,31 @@ namespace TeslaLogger
         public int current_speed = 0;
         public int current_power = 0;
         public double current_odometer = 0;
-        public double current_ideal_battery_range_km = 0;
+
+        private double _current_ideal_battery_range_km = 0;
+        public double current_ideal_battery_range_km
+        {
+            get { return _current_ideal_battery_range_km; }
+            set {
+                _current_ideal_battery_range_km = value;
+                    }
+        }
+
         public double current_battery_range_km = 0;
         public double current_outside_temp = 0;
         public double current_inside_temp = 0;
-        public int current_battery_level = 0;
+        private int _current_battery_level = 0;
+
+        public int current_battery_level
+        {
+            get { return _current_battery_level; }
+            set
+            {
+                _current_battery_level = value;
+            }
+
+        }
+
 
         public int current_charger_voltage = 0;
         public int current_charger_phases = 0;
