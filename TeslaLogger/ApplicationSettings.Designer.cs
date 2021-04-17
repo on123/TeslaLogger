@@ -148,5 +148,28 @@ namespace TeslaLogger {
                 return ((bool)(this["VerboseMode"]));
             }
         }
+
+        [global::System.Configuration.ApplicationScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("bassmaster187/TeslaLogger")]
+        public string Repository
+        {
+            get
+            {
+                return ((string)(this["Repository"]));
+            }
+        }
+
+        [global::System.Configuration.ApplicationScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("master")]
+        public string Branch
+        {
+            get
+            {
+                return ((string)(this["Branch"]));
+            }
+        }
+
     }
 }

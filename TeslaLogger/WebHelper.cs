@@ -3549,7 +3549,7 @@ namespace TeslaLogger
                 string contents;
                 using (WebClient wc = new WebClient())
                 {
-                    contents = wc.DownloadString("https://raw.githubusercontent.com/bassmaster187/TeslaLogger/master/TeslaLogger/Properties/AssemblyInfo.cs");
+                    contents = wc.DownloadString("https://raw.githubusercontent.com/" + ApplicationSettings.Default.Repository + "/" + ApplicationSettings.Default.Branch + "/TeslaLogger/Properties/AssemblyInfo.cs");
                 }
 
                 Match m = regexAssemblyVersion.Match(contents);

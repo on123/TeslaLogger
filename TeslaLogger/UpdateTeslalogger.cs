@@ -510,8 +510,10 @@ CREATE TABLE superchargerstate(
                 // download update package from github
                 bool httpDownloadSuccessful = false;
                 bool zipExtractSuccessful = false;
-                string GitHubURL = "https://github.com/bassmaster187/TeslaLogger/archive/master.zip";
-                string updatepackage = "/etc/teslalogger/tmp/master.zip";
+                string GitHubURL = "https://github.com/" + ApplicationSettings.Default.Repository + "/archive/" + ApplicationSettings.Default.Branch + ".zip";
+                Tools.DebugLog($"GithubURL : {GitHubURL}");
+
+                string updatepackage = "/etc/teslalogger/tmp/" + ApplicationSettings.Default.Branch + ".zip";
                 try
                 {
                     if (!Directory.Exists("/etc/teslalogger/tmp"))
@@ -554,10 +556,10 @@ CREATE TABLE superchargerstate(
                             Logfile.Log($"unzip update package {updatepackage} to /etc/teslalogger/tmp/zip");
                             ZipFile.ExtractToDirectory(updatepackage, "/etc/teslalogger/tmp/zip");
                             // GitHub zip contains folder "TeslaLogger-master" so we have to move files around
-                            if (Directory.Exists("/etc/teslalogger/tmp/zip/TeslaLogger-master"))
+                            if (Directory.Exists("/etc/teslalogger/tmp/zip/TeslaLogger-" + ApplicationSettings.Default.Branch))
                             {
-                                Logfile.Log($"move update files from /etc/teslalogger/tmp/zip/TeslaLogger-master to /etc/teslalogger/git");
-                                Tools.Exec_mono("mv", "/etc/teslalogger/tmp/zip/TeslaLogger-master /etc/teslalogger/git");
+                                Logfile.Log($"move update files from /etc/teslalogger/tmp/zip/TeslaLogger-" + ApplicationSettings.Default.Branch + " to /etc/teslalogger/git");
+                                Tools.Exec_mono("mv", "/etc/teslalogger/tmp/zip/TeslaLogger-" + ApplicationSettings.Default.Branch + " /etc/teslalogger/git");
                                 if (Directory.Exists("/etc/teslalogger/git/TeslaLogger/GrafanaPlugins"))
                                 {
                                     Logfile.Log("update package: download and unzip successful");
@@ -579,7 +581,8 @@ CREATE TABLE superchargerstate(
                     for (int x = 1; x < 10; x++)
                     {
                         Logfile.Log("git clone: try " + x);
-                        Tools.Exec_mono("git", "clone --progress https://github.com/bassmaster187/TeslaLogger /etc/teslalogger/git/", true, true);
+                        Tools.Exec_mono("git", "clone --progress https://github.com/" + ApplicationSettings.Default.Repository + " /etc/teslalogger/git/", true, true);
+                        Tools.DebugLog("GIT Command: git clone --progress https://github.com/" + ApplicationSettings.Default.Repository + " /etc/teslalogger/git/");
 
                         if (Directory.Exists("/etc/teslalogger/git/TeslaLogger/GrafanaPlugins"))
                         {
